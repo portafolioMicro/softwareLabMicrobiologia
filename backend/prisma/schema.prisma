@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RolUsuario {
+  Administrador
+  Analista
+  Tecnico
+}
+
+enum EstadoSet {
+  Registrado
+  En_Proceso
+  Finalizado
+  Firmado
+
+  @@map("estado_set")
+}
+
+model Usuario {
+  id_usuario      Int        @id @default(autoincrement())
+  nombre_completo String     @db.VarChar(150)
+  correo          String     @unique @db.VarChar(100)
+  cargo           String?    @db.VarChar(100)
+  rol             RolUsuario
+  password_hash   String     @db.VarChar(255)
+  activo          Boolean    @default(true)
+  fecha_creacion  DateTime   @default(now())
+
+  setsRecibidos   Set_Muestra[]              @relation("UsuarioRecepcion")
+  resultados      Muestra_Analisis_Resultado[] @relation("UsuarioAnalista")
+
+  @@map("usuario")
+}
+
+model Cliente {
+  id_cliente        Int      @id @default(autoincrement())
+  nit               String   @unique @db.VarChar(20)
+  nombre_empresa    String   @db.VarChar(150)
+  nombre_responsable String  @db.VarChar(100)
+  ciudad            String?  @db.VarChar(100)
+  direccion         String?  @db.VarChar(150)
+  correo            String?  @db.VarChar(100)
+  telefono          String?  @db.VarChar(20)
+  fecha_registro    DateTime @default(now())
+
+  sets              Set_Muestra[]
+
+  @@map("cliente")
+}
+
+model Set_Muestra {
+  id_set_muestra        Int       @id @default(autoincrement())
+  codigo_set             String    @unique @db.VarChar(50)
+  id_cliente              Int
+  id_usuario_recepcion    Int
+  solicitante             String?   @db.VarChar(100)
+  causa_analisis          String?   @db.VarChar(100)
+  responsable_toma        String?   @db.VarChar(100)
+  lugar_toma              String?   @db.VarChar(150)
+  direccion_muestreo      String?   @db.VarChar(200)
+  fecha_hora_toma         DateTime?
+  fecha_hora_recepcion    DateTime?
+  fecha_estimada_reporte  DateTime? @db.Date
+  estado_set              EstadoSet @default(Registrado)
+  acreditado_onac         Boolean   @default(false)
+
+  cliente                 Cliente   @relation(fields: [id_cliente], references: [id_cliente])
+  usuarioRecepcion        Usuario   @relation("UsuarioRecepcion", fields: [id_usuario_recepcion], references: [id_usuario])
+  muestras                Muestra[]
+
+  @@map("set_muestra")
+}
+
+model Muestra {
+  id_muestra            Int       @id @default(autoincrement())
+  id_set_muestra        Int
+  id_norma              Int
+  codigo_muestra        String    @unique @db.VarChar(50)
+  nombre_muestra        String    @db.VarChar(150)
+  proveedor_manipulador String?   @db.VarChar(100)
+  cantidad               String?   @db.VarChar(30)
+  tipo_matriz            String?   @db.VarChar(20)
+  temp_toma              String?   @db.VarChar(20)
+  temp_recepcion         String?   @db.VarChar(20)
+  lote                   String?   @db.VarChar(50)
+  fecha_produccion       DateTime? @db.Date
+  fecha_vencimiento      DateTime? @db.Date
+  estado_fisico          String?   @db.VarChar(50)
+
+  set                    Set_Muestra @relation(fields: [id_set_muestra], references: [id_set_muestra])
+  norma                  Norma       @relation(fields: [id_norma], references: [id_norma])
+  resultados             Muestra_Analisis_Resultado[]
+
+  @@map("muestra")
+}
+
+model Analisis {
+  id_analisis            Int      @id @default(autoincrement())
+  nombre_analisis        String   @unique @db.VarChar(150)
+  descripcion             String?  @db.Text
+  metodo_referencia       String?  @db.VarChar(150)
+  unidad_medida_defecto   String?  @db.VarChar(30)
+  activo                  Boolean  @default(true)
+
+  normas                  Norma_Analisis[]
+  resultados              Muestra_Analisis_Resultado[]
+
+  @@map("analisis")
+}
+
+model Categoria_Matriz {
+  id_categoria      Int      @id @default(autoincrement())
+  nombre_categoria  String   @unique @db.VarChar(100)
+
+  normas            Norma[]
+
+  @@map("categoria_matriz")
+}
+
+model Norma {
+  id_norma      Int      @id @default(autoincrement())
+  id_categoria  Int
+  nombre_norma  String   @db.VarChar(150)
+  descripcion   String?  @db.Text
+  activo        Boolean  @default(true)
+
+  categoria     Categoria_Matriz @relation(fields: [id_categoria], references: [id_categoria])
+  analisis      Norma_Analisis[]
+  muestras      Muestra[]
+
+  @@map("norma")
+}
+
+model Norma_Analisis {
+  id_norma_analisis        Int      @id @default(autoincrement())
+  id_norma                  Int
+  id_analisis                Int
+  tecnica_defecto            String?  @db.VarChar(150)
+  valor_referencia_defecto   String?  @db.VarChar(100)
+
+  norma                     Norma    @relation(fields: [id_norma], references: [id_norma])
+  analisis                  Analisis @relation(fields: [id_analisis], references: [id_analisis])
+
+  @@unique([id_norma, id_analisis])
+  @@map("norma_analisis")
+}
+
+model Muestra_Analisis_Resultado {
+  id_resultado           Int       @id @default(autoincrement())
+  id_muestra              Int
+  id_analisis              Int
+  id_analista              Int?
+  metodo_utilizado         String?   @db.VarChar(150)
+  normativa_comparativa    String?   @db.VarChar(150)
+  valor_referencia         String?   @db.VarChar(100)
+  incertidumbre            String?   @db.VarChar(50)
+  resultado_1              String?   @db.VarChar(100)
+  resultado_2              String?   @db.VarChar(100)
+  resultado_3              String?   @db.VarChar(100)
+  resultado_4              String?   @db.VarChar(100)
+  resultado_5              String?   @db.VarChar(100)
+  resultado_final          String?   @db.VarChar(100)
+  unidad_medida             String?   @db.VarChar(30)
+  concepto                  String?   @db.VarChar(100)
+  fecha_analisis            DateTime?
+  lote_medios_cultivo       String?   @db.VarChar(100)
+  fecha_registro             DateTime  @default(now())
+
+  muestra                   Muestra   @relation(fields: [id_muestra], references: [id_muestra])
+  analisis                  Analisis  @relation(fields: [id_analisis], references: [id_analisis])
+  analista                  Usuario?  @relation("UsuarioAnalista", fields: [id_analista], references: [id_usuario])
+
+  @@map("muestra_analisis_resultado")
+}
