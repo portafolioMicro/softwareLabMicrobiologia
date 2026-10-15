@@ -286,12 +286,12 @@ export const contactInfo = {
     desc: "Atención directa y orientación personalizada:",
     lines: [
       { label: "(+57) 350 671 28 01", href: "https://wa.me/573506712801" }, // TODO
-      { label: "(+57) 312 574 80 19", href: "https://wa.me/573125748019" }, // TODO
+      { label: "(+57) 320 574 80 19", href: "https://wa.me/573205748019" }, // TODO
     ],
     tag: "Respuesta Oportuna",
   },
 };
 
-export const whatsappFloatHref = "https://wa.me/573000000000"; // TODO: número real de asesoría
+export const whatsappFloatHref = "https://wa.me/573205748019"; // TODO: número real de asesoría
 
 export const portfolioPdfUrl = "/portafolio-servicios.pdf"; // TODO: subir el PDF real a /public
