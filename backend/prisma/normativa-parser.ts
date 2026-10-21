@@ -1,26 +1,29 @@
 import * as XLSX from "xlsx";
 
+export const TECNICA_REMITIDA = "Se remite a otro laboratorio";
+export const SEGUN_CLIENTE = "Según criterio del cliente";
+const MAX_NOMBRE = 150; // límite de la columna nombre_norma
+
 /* ---------- Tipos ---------- */
 
 export interface FilaNorma {
-  fila: number; // número de fila en el Excel (para ubicar errores)
-  analisis: string; // nombre canónico del análisis
-  analisisOriginal: string;
+  fila: number; // fila del Excel (para ubicar errores)
+  analisis: string; // nombre unificado del análisis
   tecnica: string | null;
   valorReferencia: string | null;
 }
 
 export interface BloqueNorma {
-  item: string; // "1,4"
-  capitulo: number; // 1
-  producto: string;
+  clave: string; // prefijo único para reconocer la norma en la base
+  nombre: string; // nombre_norma
+  categoria: string;
+  descripcion: string;
   filas: FilaNorma[];
 }
 
 export interface Omitido {
   producto: string;
-  norma: string;
-  filas: string; // "519-521, 551-552"
+  filas: string;
   motivo: string;
 }
 
@@ -28,10 +31,10 @@ export interface ResultadoParser {
   bloques: BloqueNorma[];
   omitidos: Omitido[];
   avisos: string[];
-  metodosSospechosos: Map<string, { motivo: string; veces: number }>;
+  porConfirmar: Map<string, { motivo: string; veces: number }>;
 }
 
-/* ---------- Nombres de categoría por capítulo (inferidos de los productos) ---------- */
+/* ---------- Categorías (capítulos de la Resolución 1407, nombres inferidos) ---------- */
 
 export const CATEGORIA_POR_CAPITULO: Record<number, string> = {
   1: "Productos lácteos",
@@ -90,12 +93,47 @@ export function nombreCanonico(original: string): string | null {
   return null;
 }
 
+/** Análisis que el laboratorio no hace y envía a otro laboratorio (confirmado por ellos). */
+const REMITIDOS = new Set([
+  "Clostridium sulfito reductor",
+  "Vibrio parahaemolyticus",
+  "Vibrio cholerae O1",
+  "Cronobacter spp.",
+  "Bacterias ácido lácticas",
+]);
+
+/** Técnica según la tabla Método → Técnica que envió el laboratorio (Hoja2). */
+function tecnicaOficial(analisis: string, tecnicaFila: string | null, original: string): string | null {
+  const fm = /\bF\.?M\b/i.test(original);
+  const conFM = (t: string) => (fm ? `${t} (F.M)` : t);
+
+  if (REMITIDOS.has(analisis)) return TECNICA_REMITIDA;
+
+  switch (analisis) {
+    case "Staphylococcus coagulasa positiva":
+      return "ISO 6888-1:2021";
+    case "Mohos":
+    case "Levaduras":
+      return "ISO 21527-2:2008";
+    case "Bacillus cereus":
+    case "Enterobacterias":
+      return "ICMSF Vol. 1, 2.ª edición";
+    case "Coliformes":
+    case "Escherichia coli":
+      return tecnicaFila && /ISO\s*9308/i.test(tecnicaFila) ? conFM("ISO 9308-1:2014") : "NTC 4458:2018";
+    case "Aerobios mesófilos":
+      return tecnicaFila && /SM\.?\s*9215/i.test(tecnicaFila) ? conFM("SM 9215 D") : "AOAC 966.23:2005";
+    default:
+      return tecnicaFila ? conFM(tecnicaFila) : null; // Salmonella, Listeria, Pseudomonas: tal como vienen
+  }
+}
+
 function formatearBase(base: string | null): string | null {
   if (!base) return null;
   return base.replace(/^(\d+)\s*(ml|g)$/i, "$1 $2").replace(/\bml\b/i, "mL");
 }
 
-/** Arma el texto del valor de referencia, p. ej. "M: 1000 UFC/g o mL" o "Ausencia/25 g o mL". */
+/** Arma el texto del valor, p. ej. "M: 1000 UFC/g o mL" o "Ausencia/25 g o mL". */
 function formatearValor(
   tipo: string | null,
   valor: string | null,
@@ -103,19 +141,13 @@ function formatearValor(
   base: string | null,
 ): string | null {
   if (!valor && !tipo) return null;
-  if ((valor ?? "").toLowerCase().startsWith("ausencia") || (tipo ?? "").toLowerCase().startsWith("ausencia")) {
-    return valor && valor.toLowerCase().startsWith("ausencia") ? valor : tipo;
-  }
+  const esAusencia = (s: string | null) => (s ?? "").toLowerCase().startsWith("ausencia");
+  if (esAusencia(valor) || esAusencia(tipo)) return esAusencia(valor) ? valor : tipo;
   if (!valor) return null;
+  const t = tipo ?? (valor.startsWith("<") ? "m" : null); // "<10" sin letra: la norma no permite presencia → m
   const u = unidad && unidad.toLowerCase() !== "no aplica" ? unidad : null;
-  const b = formatearBase(base);
-  const medida = [u, b].filter(Boolean).join("/");
-  return `${tipo ? tipo + ": " : ""}${valor}${medida ? " " + medida : ""}`.trim();
-}
-
-function limpiarMetodo(m: string | null): string | null {
-  if (!m) return null;
-  return m.replace(/[.,;\s]+$/g, "").trim() || null;
+  const medida = [u, formatearBase(base)].filter(Boolean).join("/");
+  return `${t ? t + ": " : ""}${valor}${medida ? " " + medida : ""}`.trim();
 }
 
 function rangos(filas: number[]): string {
@@ -134,13 +166,17 @@ function rangos(filas: number[]): string {
   return partes.join(", ");
 }
 
+function recortar(texto: string) {
+  return texto.length <= MAX_NOMBRE ? texto : texto.slice(0, MAX_NOMBRE - 1).trimEnd() + "…";
+}
+
 /* ---------- Parser ---------- */
 
 export function parsearNormativa(rutaExcel: string): ResultadoParser {
   const wb = XLSX.readFile(rutaExcel);
-  const ws = wb.Sheets[wb.SheetNames[0]];
+  const ws = wb.Sheets[wb.SheetNames[0]]; // Hoja1
   const rango = XLSX.utils.decode_range(ws["!ref"] as string);
-  rango.s.r = 0; // forzar que el índice 0 sea la fila 1 del Excel
+  rango.s.r = 0; // el índice 0 del arreglo es la fila 1 del Excel
   rango.s.c = 0;
   const matriz = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null, raw: true, range: rango });
 
@@ -161,7 +197,6 @@ export function parsearNormativa(rutaExcel: string): ResultadoParser {
   let producto: string | null = null;
   let norma: string | null = null;
 
-  // Las filas 1-4 son encabezados; los datos empiezan en la fila 5 (índice 4)
   for (let i = 4; i < matriz.length; i++) {
     const f = matriz[i] ?? [];
     const a = limpiar(f[0]);
@@ -190,7 +225,6 @@ export function parsearNormativa(rutaExcel: string): ResultadoParser {
     });
   }
 
-  // Agrupar por producto + norma (en el orden en que aparecen)
   const grupos = new Map<string, Cruda[]>();
   for (const r of crudas) {
     const clave = `${r.producto}||${r.norma}`;
@@ -201,46 +235,68 @@ export function parsearNormativa(rutaExcel: string): ResultadoParser {
   const bloques: BloqueNorma[] = [];
   const omitidos: Omitido[] = [];
   const avisos: string[] = [];
-  const metodosSospechosos = new Map<string, { motivo: string; veces: number }>();
+  const porConfirmar = new Map<string, { motivo: string; veces: number }>();
   const itemsVistos = new Set<string>();
 
-  const marcarMetodo = (m: string | null) => {
-    if (!m) return;
+  const marcar = (analisis: string, tecnica: string | null) => {
+    if (!tecnica) return;
     let motivo: string | null = null;
-    if (/NTC 4458:\d{5}/.test(m)) motivo = "año de 5 dígitos (¿error de digitación?)";
-    else if (/ISO\s*\d{6,}/.test(m)) motivo = "número de ISO que parece mal escrito";
-    else if (/^remitir/i.test(m)) motivo = "dice 'Remitir' (¿se envía a otro laboratorio?)";
-    else if (/AOC\b/.test(m)) motivo = "dice 'AOC' (¿AOAC?)";
+    if (analisis === "Salmonella spp." && /ENMIENDA 1:2021/i.test(tecnica))
+      motivo = "Salmonella: unas filas dicen Enmienda 1:2020 y otras 1:2021; la tabla del laboratorio dice solo ISO 6579:2017";
+    else if (analisis === "Listeria monocytogenes" && /CHROMagar/i.test(tecnica))
+      motivo = "Listeria: las filas traen CHROMagar, pero la tabla del laboratorio dice 'no se define técnica aún'";
+    else if (analisis === "Pseudomonas aeruginosa")
+      motivo = "Pseudomonas: filas con ISO 16266-2006; la tabla del laboratorio dice 'ISO 16266-2:20118'";
     if (!motivo) return;
-    const previo = metodosSospechosos.get(m);
-    metodosSospechosos.set(m, { motivo, veces: (previo?.veces ?? 0) + 1 });
+    const clave = `${analisis} · ${tecnica}`;
+    porConfirmar.set(clave, { motivo, veces: (porConfirmar.get(clave)?.veces ?? 0) + 1 });
   };
 
   for (const filas of grupos.values()) {
     const { producto: prod, norma: nor } = filas[0];
     const detalleFilas = rangos(filas.map((x) => x.fila));
 
-    const m = /^resolucion\s+1407.*item\s*([\d,]+)/i.exec(nor);
-    if (!m) {
-      let motivo = "Norma no reconocida";
-      if (/^resolucion\s+1215/i.test(nor)) motivo = "Agua potable (dice Resolución 1215): confirmar con el laboratorio";
-      else if (/sugerid|suguerid/i.test(nor)) motivo = "Marcado como 'Sugerido' (borrador con datos por revisar)";
-      omitidos.push({ producto: prod, norma: nor, filas: detalleFilas, motivo });
+    /* Decidir a qué norma pertenece el bloque */
+    let clave: string;
+    let nombre: string;
+    let categoria: string;
+    let descripcion: string;
+    let valorFijo: string | null = null;
+
+    const m1407 = /^resolucion\s+1407.*item\s*([\d,]+)/i.exec(nor);
+    if (m1407) {
+      const item = m1407[1];
+      if (itemsVistos.has(item)) {
+        omitidos.push({ producto: prod, filas: detalleFilas, motivo: `El ítem ${item} ya se cargó con otro producto (pendiente de aclarar)` });
+        continue;
+      }
+      itemsVistos.add(item);
+      clave = `Res. 1407/2022 Ítem ${item} – `;
+      nombre = recortar(clave + prod);
+      categoria = CATEGORIA_POR_CAPITULO[parseInt(item.split(",")[0], 10)];
+      descripcion = `Resolución 1407 de 5 de agosto de 2022, ítem ${item}: ${prod}`;
+    } else if (/^resolucion\s+1215/i.test(nor) && /agua potable/i.test(prod)) {
+      // El laboratorio confirmó que es la Resolución 2115 de 2007
+      clave = "Res. 2115/2007 – ";
+      nombre = clave + "Agua potable";
+      categoria = "Agua potable";
+      descripcion = "Resolución 2115 de 2007: calidad del agua para consumo humano";
+    } else if (/sugerid|suguerid/i.test(nor) && /^ambiente/i.test(prod)) {
+      // El laboratorio confirmó que en ambientes los valores los define cada cliente
+      clave = "Ambientes de proceso – ";
+      nombre = clave + "criterio definido por el cliente";
+      categoria = "Ambientes de proceso";
+      descripcion = "Los límites los define cada cliente según su proceso; las técnicas son las del laboratorio";
+      valorFijo = SEGUN_CLIENTE;
+    } else {
+      const motivo = /sugerid|suguerid/i.test(nor)
+        ? "Pendiente: el laboratorio enviará la norma de referencia, el método y el valor límite"
+        : "Norma no reconocida";
+      omitidos.push({ producto: prod, filas: detalleFilas, motivo });
       continue;
     }
 
-    const item = m[1];
-    if (itemsVistos.has(item)) {
-      omitidos.push({
-        producto: prod,
-        norma: nor,
-        filas: detalleFilas,
-        motivo: `El ítem ${item} ya se cargó con otro producto`,
-      });
-      continue;
-    }
-    itemsVistos.add(item);
-
+    /* Limpiar las filas del bloque */
     const vistos = new Set<string>();
     const filasLimpias: FilaNorma[] = [];
 
@@ -260,37 +316,17 @@ export function parsearNormativa(rutaExcel: string): ResultadoParser {
       }
       vistos.add(canon);
 
-      let metodo = limpiarMetodo(r.metodo);
-      if (metodo && /podria ser/i.test(metodo)) {
-        avisos.push(`Fila ${r.fila} (${prod}): el método dice "${metodo}", se deja vacío`);
-        metodo = null;
-      }
-      if (!metodo) avisos.push(`Fila ${r.fila} (${prod} · ${canon}): sin método`);
-      marcarMetodo(metodo);
+      const tecnica = tecnicaOficial(canon, r.metodo, r.analisis);
+      marcar(canon, tecnica);
 
-      // El método de la fila F.M (filtración por membrana) se conserva en la técnica
-      if (metodo && /\bF\.?M\b/i.test(r.analisis)) metodo = `${metodo} (F.M)`;
-
-      const valor = formatearValor(r.tipo, r.valor, r.unidad, r.base);
+      const valor = valorFijo ?? formatearValor(r.tipo, r.valor, r.unidad, r.base);
       if (!valor) avisos.push(`Fila ${r.fila} (${prod} · ${canon}): sin valor de referencia`);
-      else if (!r.tipo) avisos.push(`Fila ${r.fila} (${prod} · ${canon}): el valor no trae tipo M/m`);
 
-      filasLimpias.push({
-        fila: r.fila,
-        analisis: canon,
-        analisisOriginal: r.analisis,
-        tecnica: metodo,
-        valorReferencia: valor,
-      });
+      filasLimpias.push({ fila: r.fila, analisis: canon, tecnica, valorReferencia: valor });
     }
 
-    bloques.push({
-      item,
-      capitulo: parseInt(item.split(",")[0], 10),
-      producto: prod,
-      filas: filasLimpias,
-    });
+    bloques.push({ clave, nombre, categoria, descripcion, filas: filasLimpias });
   }
 
-  return { bloques, omitidos, avisos, metodosSospechosos };
+  return { bloques, omitidos, avisos, porConfirmar };
 }
