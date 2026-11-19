@@ -1,5 +1,6 @@
 import { SetsManager } from "@/components/sets-manager";
 
-export default function SetsPage() {
-  return <SetsManager />;
+export default async function SetsPage({ searchParams }: { searchParams: Promise<{ estado?: string }> }) {
+  const { estado } = await searchParams;
+  return <SetsManager estadoInicial={estado ?? ""} />;
 }

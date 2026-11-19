@@ -124,4 +124,10 @@ export class MuestrasController {
   guardarCondiciones(@Param("id", ParseIntPipe) id: number, @Body("condiciones") condiciones: unknown) {
     return this.muestras.guardarCondiciones(id, condiciones);
   }
+
+    /* Panel de inicio */
+  @Get("resumen")
+  resumen() {
+    return this.muestras.resumen();
+  }
 }

@@ -428,6 +428,106 @@ export class MuestrasService {
       fecha_aprobacion: fecha(r.fecha_aprobacion),
     };
   }
+
+    /* ---------- Resumen del panel de inicio ---------- */
+
+  async resumen() {
+    const REMITIDO = "Se remite a otro laboratorio";
+    type Parcial = { resultado_final: string | null; metodo_utilizado: string | null };
+    // Los análisis que se remiten a otro laboratorio no cuentan como pendientes
+    const faltantes = (rs: Parcial[]) =>
+      rs.filter((r) => !r.resultado_final && r.metodo_utilizado !== REMITIDO).length;
+
+    const [grupos, abiertas, proximos, clientes, muestras] = await Promise.all([
+      this.prisma.set_Muestra.groupBy({ by: ["estado_set"], _count: { _all: true } }),
+      this.prisma.muestra.findMany({
+        where: {
+          resultados: { some: {} },
+          OR: [{ numero_informe: null }, { resultados: { some: { resultado_final: null } } }],
+        },
+        select: {
+          id_muestra: true,
+          codigo_muestra: true,
+          nombre_muestra: true,
+          numero_informe: true,
+          set: {
+            select: {
+              id_set_muestra: true,
+              codigo_set: true,
+              fecha_estimada_reporte: true,
+              cliente: { select: { nombre_empresa: true } },
+            },
+          },
+          resultados: { select: { resultado_final: true, metodo_utilizado: true } },
+        },
+        orderBy: { id_muestra: "desc" },
+        take: 300,
+      }),
+      this.prisma.set_Muestra.findMany({
+        where: { estado_set: { in: ["Registrado", "En_Proceso"] } },
+        select: {
+          id_set_muestra: true,
+          codigo_set: true,
+          estado_set: true,
+          fecha_estimada_reporte: true,
+          cliente: { select: { nombre_empresa: true } },
+          _count: { select: { muestras: true } },
+        },
+        orderBy: [{ fecha_estimada_reporte: { sort: "asc", nulls: "last" } }, { id_set_muestra: "desc" }],
+        take: 8,
+      }),
+      this.prisma.cliente.count(),
+      this.prisma.muestra.count(),
+    ]);
+
+    const porEstado: Record<string, number> = { Registrado: 0, En_Proceso: 0, Finalizado: 0, Firmado: 0 };
+    for (const g of grupos) porEstado[g.estado_set] = g._count._all;
+
+    const pendientes: Array<{
+      id_muestra: number;
+      codigo_muestra: string;
+      nombre_muestra: string;
+      faltan: number;
+      total: number;
+      set: (typeof abiertas)[number]["set"];
+    }> = [];
+    const listas: Array<{
+      id_muestra: number;
+      codigo_muestra: string;
+      nombre_muestra: string;
+      total: number;
+      set: (typeof abiertas)[number]["set"];
+    }> = [];
+
+    for (const m of abiertas) {
+      const faltan = faltantes(m.resultados);
+      const llenos = m.resultados.filter((r) => r.resultado_final).length;
+      const base = {
+        id_muestra: m.id_muestra,
+        codigo_muestra: m.codigo_muestra,
+        nombre_muestra: m.nombre_muestra,
+        total: m.resultados.length,
+        set: m.set,
+      };
+      if (faltan > 0) pendientes.push({ ...base, faltan });
+      else if (!m.numero_informe && llenos > 0) listas.push(base);
+    }
+
+    // Las que tienen la fecha de reporte más cercana primero (sin fecha, al final)
+    const t = (d: Date | null) => (d ? d.getTime() : Number.MAX_SAFE_INTEGER);
+    pendientes.sort((a, b) => t(a.set.fecha_estimada_reporte) - t(b.set.fecha_estimada_reporte));
+
+    return {
+      porEstado,
+      clientes,
+      muestras,
+      totalPendientes: pendientes.length,
+      pendientes: pendientes.slice(0, 8),
+      totalListas: listas.length,
+      listas: listas.slice(0, 8),
+      proximos,
+    };
+  }
     /* ---------- Informe (formato F-12) ---------- */
 
   async getInforme(id: number) {

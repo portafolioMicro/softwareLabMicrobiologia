@@ -10,11 +10,11 @@ import { EstadoBadge } from "./estado-badge";
 import { createSet, listClientes, listSets, type Cliente, type SetInput, type SetResumen } from "@/lib/api";
 import { ESTADOS, formatFecha, formatFechaHora } from "@/lib/format";
 
-export function SetsManager() {
+export function SetsManager({ estadoInicial = "" }: { estadoInicial?: string }) {
   const router = useRouter();
   const [sets, setSets] = useState<SetResumen[]>([]);
   const [search, setSearch] = useState("");
-  const [estado, setEstado] = useState("");
+  const [estado, setEstado] = useState(estadoInicial);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nuevo, setNuevo] = useState(false);

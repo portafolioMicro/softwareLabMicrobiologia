@@ -500,3 +500,40 @@ export function saveCondiciones(idSet: number, condiciones: Condiciones): Promis
     body: JSON.stringify({ condiciones }),
   });
 }
+/* ---------- Resumen del panel de inicio ---------- */
+
+export interface ResumenMuestra {
+  id_muestra: number;
+  codigo_muestra: string;
+  nombre_muestra: string;
+  faltan?: number;
+  total: number;
+  set: {
+    id_set_muestra: number;
+    codigo_set: string;
+    fecha_estimada_reporte: string | null;
+    cliente: { nombre_empresa: string };
+  };
+}
+
+export interface Resumen {
+  porEstado: Record<EstadoSet, number>;
+  clientes: number;
+  muestras: number;
+  totalPendientes: number;
+  pendientes: ResumenMuestra[];
+  totalListas: number;
+  listas: ResumenMuestra[];
+  proximos: {
+    id_set_muestra: number;
+    codigo_set: string;
+    estado_set: EstadoSet;
+    fecha_estimada_reporte: string | null;
+    cliente: { nombre_empresa: string };
+    _count: { muestras: number };
+  }[];
+}
+
+export function getResumen(): Promise<Resumen> {
+  return apiFetch<Resumen>(`/resumen`);
+}
