@@ -1,6 +1,7 @@
 import { getSessionUser } from "@/lib/session";
 import { PanelSidebar } from "@/components/panel-sidebar";
 import { LogoutButton } from "@/components/logout-button";
+import { CambiarPasswordButton } from "@/components/cambiar-password-button";
 
 export default async function PanelLayout({ children }: { children: React.ReactNode }) {
   const usuario = await getSessionUser();
@@ -10,15 +11,18 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       <PanelSidebar rol={usuario.rol} />
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-20 bg-surface-container-lowest shadow-sm px-space-lg flex items-center justify-between gap-space-md">
+        <header className="no-print h-20 bg-surface-container-lowest shadow-sm px-space-lg flex items-center justify-between gap-space-md">
           <div className="flex flex-col leading-tight">
             <span className="font-title-md text-title-md text-on-surface">{usuario.nombre_completo}</span>
             <span className="font-label-md text-label-md text-secondary">{usuario.rol}</span>
           </div>
-          <LogoutButton />
+          <div className="flex items-center gap-space-sm">
+            <CambiarPasswordButton />
+            <LogoutButton />
+          </div>
         </header>
 
-        <main className="flex-1 p-space-lg">{children}</main>
+        <main className="print-main flex-1 p-space-lg">{children}</main>
       </div>
     </div>
   );

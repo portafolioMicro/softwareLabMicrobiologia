@@ -34,6 +34,8 @@ model Usuario {
 
   setsRecibidos   Set_Muestra[]              @relation("UsuarioRecepcion")
   resultados      Muestra_Analisis_Resultado[] @relation("UsuarioAnalista")
+  informesElaborados      Muestra[] @relation("InformeElabora")
+  informesAutorizados     Muestra[] @relation("InformeAutoriza")
 
   @@map("usuario")
 }
@@ -69,10 +71,13 @@ model Set_Muestra {
   fecha_estimada_reporte  DateTime? @db.Date
   estado_set              EstadoSet @default(Registrado)
   acreditado_onac         Boolean   @default(false)
+  acta                    Json?
+  condiciones_analisis    Json?
 
   cliente                 Cliente   @relation(fields: [id_cliente], references: [id_cliente])
   usuarioRecepcion        Usuario   @relation("UsuarioRecepcion", fields: [id_usuario_recepcion], references: [id_usuario])
   muestras                Muestra[]
+  
 
   @@map("set_muestra")
 }
@@ -92,10 +97,20 @@ model Muestra {
   fecha_produccion       DateTime? @db.Date
   fecha_vencimiento      DateTime? @db.Date
   estado_fisico          String?   @db.VarChar(50)
+  punto_muestreo          String?   @db.VarChar(150)
+  tecnica_muestreo        String?   @db.VarChar(100)
+  numero_informe          String?   @unique @db.VarChar(20)
+  fecha_emision           DateTime? @db.Date
+  observaciones_tecnicas  String?   @db.Text
+  id_usuario_elabora      Int?
+  id_usuario_autoriza     Int?
 
   set                    Set_Muestra @relation(fields: [id_set_muestra], references: [id_set_muestra])
   norma                  Norma       @relation(fields: [id_norma], references: [id_norma])
   resultados             Muestra_Analisis_Resultado[]
+  usuarioElabora          Usuario?  @relation("InformeElabora", fields: [id_usuario_elabora], references: [id_usuario])
+  usuarioAutoriza         Usuario?  @relation("InformeAutoriza", fields: [id_usuario_autoriza], references: [id_usuario])
+  
 
   @@map("muestra")
 }
@@ -167,7 +182,9 @@ model Muestra_Analisis_Resultado {
   resultado_5              String?   @db.VarChar(100)
   resultado_final          String?   @db.VarChar(100)
   unidad_medida             String?   @db.VarChar(30)
-  concepto                  String?   @db.VarChar(100)
+  concepto                  String?   @db.VarChar(200)
+  tecnica                 String?   @db.VarChar(50)
+  acreditado              Boolean   @default(false)
   fecha_analisis            DateTime?
   lote_medios_cultivo       String?   @db.VarChar(100)
   fecha_registro             DateTime  @default(now())

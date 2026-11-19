@@ -13,7 +13,7 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const usuario = await this.prisma.usuario.findUnique({
-      where: { correo: dto.correo },
+      where: { correo: dto.correo.trim().toLowerCase() },
     });
 
     // Mensaje genérico a propósito: no revelamos si falló el correo o la contraseña
